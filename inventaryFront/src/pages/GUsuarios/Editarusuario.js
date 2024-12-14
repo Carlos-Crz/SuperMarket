@@ -101,13 +101,13 @@ function Editarusuario() {
   return (
     <Layout>
       <InfoSection
-        title="Actualizar Categoría"
+        title="Actualizar usuario"
         showSubtitle={false} // Mostrar subtítulo
         showDescription={false} // Mostrar descripción
       />
       <Form
         fields={fields}
-        title="Información de la categoría"
+        title="Información de la usuario"
         buttons={buttons}
         formData={formData}
         setFormData={setFormData}

@@ -3,7 +3,7 @@ import '../App.css';
 
 function Button({ text, onClick }) {
   return (
-    <button class="conteiner__button" onClick={onClick}>
+    <button className="conteiner__button" onClick={onClick}>
         {text}
     </button>
   );

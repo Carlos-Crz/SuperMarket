@@ -86,6 +86,10 @@ function App() {
         <Route path="/GestioncajasVer/:id" element={<Vercajas />} />
         <Route path="/GestioncajasEditar/:id" element={<Editarcajas />} />
 
+        {/* Ruta para la página de Gestion de Pedidos */}
+
+
+
       </Routes>
     </Router>
   );

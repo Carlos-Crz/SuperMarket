@@ -78,7 +78,7 @@ function Crearusuarios() {
 
   const buttons = [
     { text: 'Cancelar', type: 'button', className: 'buttons-can', onClick: () => navigate('/Gestionusuarios'), hidden: false },
-    { text: 'Crear Categoria', type: 'submit', hidden: false },
+    { text: 'Crear Usuario', type: 'submit', hidden: false },
   ];
   
   return (

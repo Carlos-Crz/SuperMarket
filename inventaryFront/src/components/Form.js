@@ -5,7 +5,7 @@ function Form({ fields, title, buttons, onSubmit, formData, setFormData, selectO
   console.log(formData);
 
   return (
-    <form onSubmit={onSubmit}>
+    <form onSubmit={onSubmit} data-testid="form">
       <div className="conteiner__form">
         <h3>{title}</h3>
         <div className="form__inputs">

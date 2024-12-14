@@ -20,7 +20,7 @@ app.use(session({
   secret: 'clave123',
    resave: false,
    saveUninitialized: true,
-   cookie: { secure: false, maxAge: 60000 }
+   cookie: { secure: false, maxAge: 4 * 60 * 60 * 1000, }
 }));
 
 // Conexión a la base de datos
@@ -34,24 +34,61 @@ const connection = mysql.createPool({
 app.get('/login', async (req, res) => {
   const datos = req.query;
   try {
-    // Consulta a la base de datos
     const [results, fields] = await connection.query(
       "SELECT * FROM `usuarios` WHERE `nombre_usuario` = ? AND `contrasenia` = ?", 
       [datos.nombre_usuario, datos.contrasenia]
     );
     
-    if(results.length > 0){
+    if (results.length > 0) {
+      const user = results[0];
       req.session.isAuthenticated = true;
-      req.session.nombre_usuario = datos.nombre_usuario;
-      res.status(200).send({ success: true, message: 'Inicio de Sesión correcto' })
+      req.session.nombre_usuario = user.nombre_usuario;
+      req.session.nombre = user.nombre; // Agregar nombre
+      req.session.apellido = user.apellido; // Agregar apellido
+      res.status(200).send({
+        success: true,
+        message: 'Inicio de Sesión correcto',
+        nombre: user.nombre,
+        apellido: user.apellido
+      });
     } else {
-      res.status(401).send({ success: false, message: 'Datos incorrectos' })
+      res.status(401).send({ success: false, message: 'Datos incorrectos' });
     }
   } catch (err) {
-      console.log(err);
-      res.status(500).json({ success: false, message: 'Error en el servidor' });
+    console.log(err);
+    res.status(500).json({ success: false, message: 'Error en el servidor' });
   }
-})
+});
+
+app.get('/user', async (req, res) => {
+  if (req.session.isAuthenticated) {
+    try {
+      const [userResults] = await connection.query(
+        "SELECT usuarios.nombre_usuario, usuarios.nombre, usuarios.apellido, cargo.nombre_cargo AS cargo FROM usuarios JOIN cargo ON usuarios.id_cargo = cargo.id_cargo WHERE usuarios.nombre_usuario = ?",
+        [req.session.nombre_usuario]
+      );
+
+      if (userResults.length > 0) {
+        const user = userResults[0];
+        res.status(200).json({
+          nombre: user.nombre,
+          apellido: user.apellido,
+          cargo: user.cargo, // Añadimos el cargo
+          nombre_usuario: user.nombre_usuario // También mandamos el nombre de usuario
+        });
+      } else {
+        res.status(401).json({ message: 'Usuario no encontrado' });
+      }
+    } catch (error) {
+      console.error('Error al obtener datos del usuario', error);
+      res.status(500).json({ message: 'Error en el servidor' });
+    }
+  } else {
+    res.status(401).json({ message: 'Usuario no autenticado' });
+  }
+});
+
+
 
 
 // Ruta para verificar el estado de autenticación
@@ -76,6 +113,31 @@ app.post('/logout', (req, res) => {
 });
 
 
+// Endpoint para obtener datos del dashboard
+app.get('/api/dashboard-data', async (req, res) => {
+  try {
+    const [usuarios] = await connection.query('SELECT COUNT(*) AS count FROM usuarios');
+    const [proveedores] = await connection.query('SELECT COUNT(*) AS count FROM proveedores');
+    const [productos] = await connection.query('SELECT COUNT(*) AS count FROM productos');
+    const [cajas] = await connection.query('SELECT COUNT(*) AS count FROM cajas');
+    const [categorias] = await connection.query('SELECT COUNT(*) AS count FROM categorias');
+    const [clientes] = await connection.query('SELECT COUNT(*) AS count FROM clientes');
+
+    res.json({
+      usuarios: usuarios[0].count,
+      proveedores: proveedores[0].count,
+      productos: productos[0].count,
+      cajas: cajas[0].count,
+      categorias: categorias[0].count,
+      clientes: clientes[0].count,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Error al obtener los datos del dashboard' });
+  }
+});
+
+
 app.listen(port, () => {
   console.log(`Example app listening on port ${port}`)
 })
@@ -91,7 +153,6 @@ app.get('/categorias', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 // Ruta para crear una nueva categoría
 app.post('/categoriascreate', async (req, res) => {
   const { nombre_categoria, ubicacion } = req.body;
@@ -106,8 +167,6 @@ app.post('/categoriascreate', async (req, res) => {
     res.status(500).json({ error: 'Error al crear la categoría' });
   }
 });
-
-
 // Obtener categoría por ID
 app.get('/categoriasver/:id', async (req, res) => {
   const { id } = req.params;
@@ -122,7 +181,6 @@ app.get('/categoriasver/:id', async (req, res) => {
     res.status(500).json({ message: 'Error interno del servidor' });
   }
 });
-
 // Actualizar categoría por ID
 app.put('/categoriasupdate/:id', async (req, res) => {
   const { id } = req.params;  // Obtener el ID de la categoría desde los parámetros de la URL
@@ -147,12 +205,18 @@ app.put('/categoriasupdate/:id', async (req, res) => {
     return res.status(500).json({ error: 'Error al actualizar la categoría' });
   }
 });
-
 // Eliminar categoría por ID
 app.delete('/categoriasdelete/:id', async (req, res) => {
   const { id } = req.params;  // Obtener el ID de la categoría desde los parámetros de la URL
 
   try {
+    // Verificar si la categoría está asociada a un producto
+    const [associatedProduct] = await connection.query('SELECT * FROM productos WHERE id_categoria = ?', [id]);
+    if (associatedProduct.length > 0) {
+      return res.status(400).json({ error: 'No se puede eliminar la categoría, está asociada a un producto' });
+    }
+
+
     // Usar la consulta SQL para eliminar la categoría
     const [result] = await connection.query(
       'DELETE FROM categorias WHERE id_categoria = ?',
@@ -186,8 +250,7 @@ app.delete('/categoriasdelete/:id', async (req, res) => {
 
 
 /* ----- CRUD USUARIOS ----- */
-
-// Obtener todas los Usuarios
+// Obtener todos los Usuarios
 app.get('/usuarios', async (req, res) => {
   try {
     const [rows] = await connection.query('SELECT u.id_usuario, u.documento, u.nombre, u.telefono, u.email, c.nombre_cargo FROM usuarios u JOIN cargo c ON u.id_cargo = c.id_cargo');
@@ -196,7 +259,6 @@ app.get('/usuarios', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 // Obtener Usuario por ID
 app.get('/usuariosver/:id', async (req, res) => {
   const { id } = req.params;
@@ -211,7 +273,6 @@ app.get('/usuariosver/:id', async (req, res) => {
     res.status(500).json({ message: 'Error interno del servidor' });
   }
 });
-
 // Obtener todos los cargos
 app.get('/cargos', async (req, res) => {
   try {
@@ -222,7 +283,6 @@ app.get('/cargos', async (req, res) => {
     res.status(500).json({ error: 'Error al obtener los cargos' });
   }
 });
-
 // Ruta para crear un nuevo Usuario
 app.post('/usuarioscreate', async (req, res) => {
   const { nombre, apellido, tipo_documento, documento, fecha_nacimiento, genero, email, telefono, nombre_usuario, contrasenia, id_cargo } = req.body;
@@ -237,7 +297,6 @@ app.post('/usuarioscreate', async (req, res) => {
     res.status(500).json({ error: 'Error al crear el usuario' });
   }
 });
-
 // Actualizar Usuario por ID
 app.put('/usuariosupdate/:id', async (req, res) => {
   const { id } = req.params;  // Obtener el ID de la categoría desde los parámetros de la URL
@@ -261,7 +320,6 @@ app.put('/usuariosupdate/:id', async (req, res) => {
     return res.status(500).json({ error: 'Error al actualizar el usuario' });
   }
 });
-
 // Eliminar Usuario por ID
 app.delete('/usuariosdelete/:id', async (req, res) => {
   const { id } = req.params;  // Obtener el ID de la categoría desde los parámetros de la URL
@@ -296,11 +354,10 @@ app.delete('/usuariosdelete/:id', async (req, res) => {
     return res.status(500).json({ error: 'Error al eliminar la usuarios' });
   }
 });
-
 /* ----- END CRUD USUARIOS ----- */
 
-/* ----- CRUD PRODUCTOS ----- */
 
+/* ----- CRUD PRODUCTOS ----- */
 // Obtener Producto por ID
 app.get('/productosver/:id', async (req, res) => {
   const { id } = req.params;
@@ -315,7 +372,6 @@ app.get('/productosver/:id', async (req, res) => {
     res.status(500).json({ message: 'Error interno del servidor' });
   }
 });
-
 // Obtener todos los Productos
 app.get('/productos', async (req, res) => {
   try {
@@ -325,7 +381,6 @@ app.get('/productos', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 // Ruta para crear un nuevo Producto
 app.post('/productoscreate', async (req, res) => {
   const { codigo_barras, nombre_producto, descripcion, presentacion, precio_compra, precio_venta, stock, id_categoria } = req.body;
@@ -340,7 +395,6 @@ app.post('/productoscreate', async (req, res) => {
     res.status(500).json({ error: 'Error al crear el producto' });
   }
 });
-
 // Actualizar Producto por ID
 app.put('/productosupdate/:id', async (req, res) => {
   const { id } = req.params;  // Obtener el ID de la categoría desde los parámetros de la URL
@@ -364,7 +418,6 @@ app.put('/productosupdate/:id', async (req, res) => {
     return res.status(500).json({ error: 'Error al actualizar el producto' });
   }
 });
-
 // Eliminar Producto por ID
 app.delete('/productosdelete/:id', async (req, res) => {
   const { id } = req.params;  // Obtener el ID del producto desde los parámetros de la URL
@@ -412,7 +465,6 @@ app.get('/proveedores', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 // Ruta para crear un nuevo Proveedor
 app.post('/proveedorescreate', async (req, res) => {
   const { nombre_proveedor, encargado, telefono, email } = req.body;
@@ -427,7 +479,6 @@ app.post('/proveedorescreate', async (req, res) => {
     res.status(500).json({ error: 'Error al crear el proveedor' });
   }
 });
-
 // Obtener Proveedor por ID
 app.get('/proveedoresver/:id', async (req, res) => {
   const { id } = req.params;
@@ -442,7 +493,6 @@ app.get('/proveedoresver/:id', async (req, res) => {
     res.status(500).json({ message: 'Error interno del servidor' });
   }
 });
-
 // Actualizar proveedor por ID
 app.put('/proveedoresupdate/:id', async (req, res) => {
   const { id } = req.params;  // Obtener el ID del proveedor desde los parámetros de la URL
@@ -463,11 +513,10 @@ app.put('/proveedoresupdate/:id', async (req, res) => {
     // Devolver un mensaje de éxito con los datos actualizados
     res.status(200).json({ message: 'Proveedor actualizado correctamente', id, nombre_proveedor, encargado, telefono, email });
   } catch (err) {
-    console.error('Error al actualizar la proveedor:', err);
+    console.error('Error al actualizar el proveedor:', err);
     return res.status(500).json({ error: 'Error al actualizar el proveedor' });
   }
 });
-
 // Eliminar Proveedor por ID
 app.delete('/proveedoresdelete/:id', async (req, res) => {
   const { id } = req.params;  // Obtener el ID de la proveedores desde los parámetros de la URL
@@ -481,7 +530,7 @@ app.delete('/proveedoresdelete/:id', async (req, res) => {
 
     // Verificar si alguna fila fue afectada
     if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Proveedores no encontrada' });
+      return res.status(404).json({ error: 'Proveedor no encontrado' });
     }
 
     // Verificar si el ID eliminado era el último de la tabla
@@ -495,11 +544,11 @@ app.delete('/proveedoresdelete/:id', async (req, res) => {
       await connection.query(`ALTER TABLE proveedores AUTO_INCREMENT = ${maxId + 1}`);
     }
 
-    // Devolver un mensaje de éxito si la Proveedor fue eliminada
-    res.status(200).json({ message: 'Proveedor eliminada correctamente', id });
+    // Devolver un mensaje de éxito si la Proveedor fue eliminado
+    res.status(200).json({ message: 'Proveedor eliminado correctamente', id });
   } catch (err) {
     console.error('Error al eliminar la proveedor:', err);
-    return res.status(500).json({ error: 'Error al eliminar la proveedor' });
+    return res.status(500).json({ error: 'Error al eliminar el proveedor' });
   }
 });
 /* ----- END CRUD PROVEEDORES ----- */
@@ -515,7 +564,6 @@ app.get('/clientes', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 // Obtener Cliente por ID
 app.get('/clientesver/:id', async (req, res) => {
   const { id } = req.params;
@@ -530,7 +578,6 @@ app.get('/clientesver/:id', async (req, res) => {
     res.status(500).json({ message: 'Error interno del servidor' });
   }
 });
-
 // Ruta para crear un nuevo Cliente
 app.post('/clientescreate', async (req, res) => {
   const { tipo_documento, documento, nombre_cliente, email, telefono, ciudad, direccion } = req.body;
@@ -545,7 +592,6 @@ app.post('/clientescreate', async (req, res) => {
     res.status(500).json({ error: 'Error al crear el cliente' });
   }
 });
-
 // Actualizar Cliente por ID
 app.put('/clientesupdate/:id', async (req, res) => {
   const { id } = req.params;  // Obtener el ID del cliente desde los parámetros de la URL
@@ -570,7 +616,6 @@ app.put('/clientesupdate/:id', async (req, res) => {
     return res.status(500).json({ error: 'Error al actualizar el cliente' });
   }
 });
-
 // Eliminar Cliente por ID
 app.delete('/clientesdelete/:id', async (req, res) => {
   const { id } = req.params;  // Obtener el ID del cliente desde los parámetros de la URL
@@ -599,17 +644,16 @@ app.delete('/clientesdelete/:id', async (req, res) => {
     }
 
     // Devolver un mensaje de éxito si la categoría fue eliminada
-    res.status(200).json({ message: 'Clientes eliminados correctamente', id });
+    res.status(200).json({ message: 'Cliente eliminado correctamente', id });
   } catch (err) {
-    console.error('Error al eliminar los clientes:', err);
-    return res.status(500).json({ error: 'Error al eliminar la clientes' });
+    console.error('Error al eliminar el cliente:', err);
+    return res.status(500).json({ error: 'Error al eliminar el cliente' });
   }
 });
 /* ----- END CRUD CLIENTES ----- */
 
 
-
-/* ----- END CRUD CLIENTES ----- */
+/* ----- CRUD CAJAS ----- */
 // Obtener todas las Cajas
 app.get('/cajas', async (req, res) => {
   try {
@@ -619,7 +663,6 @@ app.get('/cajas', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 // Obtener Caja por ID
 app.get('/cajasver/:id', async (req, res) => {
   const { id } = req.params;
@@ -634,7 +677,6 @@ app.get('/cajasver/:id', async (req, res) => {
     res.status(500).json({ message: 'Error interno del servidor' });
   }
 });
-
 // Obtener todos las cajas registradoras
 app.get('/cajaregistradora', async (req, res) => {
   try {
@@ -645,7 +687,6 @@ app.get('/cajaregistradora', async (req, res) => {
     res.status(500).json({ error: 'Error al obtener las cajas' });
   }
 });
-
 // Ruta para crear una nueva caja
 app.post('/cajascreate', async (req, res) => {
   const { id_usuario, id_caja_registradora } = req.body;
@@ -660,7 +701,6 @@ app.post('/cajascreate', async (req, res) => {
     res.status(500).json({ error: 'Error al crear la caja' });
   }
 });
-
 // Actualizar Caja por ID
 app.put('/cajasupdate/:id', async (req, res) => {
   const { id } = req.params;  // Obtener el ID de la categoría desde los parámetros de la URL
@@ -681,16 +721,15 @@ app.put('/cajasupdate/:id', async (req, res) => {
     res.status(200).json({ message: 'Caja actualizado correctamente', id, id_usuario, id_caja_registradora });
   } catch (err) {
     console.error('Error al actualizar la caja:', err);
-    return res.status(500).json({ error: 'Error al actualizar el caja' });
+    return res.status(500).json({ error: 'Error al actualizar la caja' });
   }
 });
-
 // Eliminar Caja por ID
 app.delete('/cajasdelete/:id', async (req, res) => {
   const { id } = req.params;  // Obtener el ID de la categoría desde los parámetros de la URL
 
   try {
-    // Usar la consulta SQL para eliminar la categoría
+    // Usar la consulta SQL para eliminar la caja
     const [result] = await connection.query(
       'DELETE FROM cajas WHERE id_caja = ?',
       [id]
@@ -698,7 +737,7 @@ app.delete('/cajasdelete/:id', async (req, res) => {
 
     // Verificar si alguna fila fue afectada
     if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Usuarios no encontrada' });
+      return res.status(404).json({ error: 'Caja no encontrada' });
     }
 
     // Verificar si el ID eliminado era el último de la tabla
@@ -719,3 +758,4 @@ app.delete('/cajasdelete/:id', async (req, res) => {
     return res.status(500).json({ error: 'Error al eliminar las caja' });
   }
 });
+/* ----- END CRUD CAJAS ----- */

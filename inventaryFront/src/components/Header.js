@@ -7,6 +7,8 @@ import user from './img/User.svg';
 import menu from './img/Menu.svg';
 
 function Header({ toggleSidebar }) {
+    const [userInfo, setUserInfo] = useState({ nombre_usuario: '', cargo: '' });
+
 	// Estado para controlar la visibilidad del menú flotante
 	const [isUserMenuVisible, setIsUserMenuVisible] = useState(false);
 	// Referencia al menú flotante del usuario
@@ -36,6 +38,27 @@ function Header({ toggleSidebar }) {
 		document.removeEventListener('mousedown', handleClickOutside);
 	};
 	}, [userMenuRef]); // El efecto depende de la referencia del menú flotante
+
+    // Obtener datos del usuario al cargar el componente
+    useEffect(() => {
+        fetch('http://localhost:3001/user', { credentials: 'include' }) // credentials: 'include' para enviar cookies
+            .then((response) => {
+                if (response.ok) {
+                    return response.json();
+                } else {
+                    throw new Error('No se pudo obtener la información del usuario');
+                }
+            })
+            .then((data) => {
+                setUserInfo({
+                    nombre_usuario: data.nombre_usuario,
+                    cargo: data.cargo,
+                    nombre: data.nombre,
+                    apellido: data.apellido,
+                });
+            })
+            .catch((error) => console.error(error));
+    }, []);
 
     // Función para cerrar sesión
     const handleLogout = async () => {
@@ -79,22 +102,14 @@ function Header({ toggleSidebar }) {
                     <img src={user} alt="" class="menu-float__header-img"/>
                     <div>
                         <span class="menu-float__header-userName">
-                            Nombre de usuario
+                            {userInfo.nombre_usuario}
                         </span>
                         <span class="menu-float__header-cargo">
-                            Cargo
+                            {userInfo.cargo}
                         </span>
                     </div>
                 </header>
                 <ul>
-                    <li class="menu-float__ul-item">
-                        <a href="/Dashboard">
-                            <span class="material-symbols-outlined">
-                                person
-                            </span>
-                            <p>Ver perfil</p>
-                        </a>
-                    </li>
                     <li class="menu-float__ul-item">
                         <a href='/Dashboard'>
                             <span class="material-symbols-outlined">
